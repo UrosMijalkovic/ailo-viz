@@ -564,6 +564,18 @@ function UnifiedMap({ selectedFunnelId, onFunnelSelect }: { selectedFunnelId: st
           <path d="M 330 540 L 320 610" stroke="var(--text-muted)" strokeWidth="1.5" markerEnd="url(#arrowGold)" fill="none" />
         </g>
 
+        {/* Webinar to Payment (direct purchase option) */}
+        <g opacity={getOpacity(['funnel-2', 'funnel-3'])} style={{ transition: 'opacity 0.3s ease' }}>
+          <path d="M 470 540 L 390 610" stroke="var(--accent-gold)" strokeWidth="1.5" markerEnd="url(#arrowGold)" fill="none" />
+          <text x="445" y="575" fill="var(--accent-gold)" fontSize="8">Direct</text>
+        </g>
+
+        {/* Webinar to Founder Call (warming option) */}
+        <g opacity={getOpacity(['funnel-2', 'funnel-3'])} style={{ transition: 'opacity 0.3s ease' }}>
+          <path d="M 420 520 L 380 520" stroke="var(--text-muted)" strokeWidth="1.5" markerEnd="url(#arrowHead)" fill="none" />
+          <text x="395" y="512" fill="var(--text-muted)" fontSize="8">or Call</text>
+        </g>
+
         {/* ===== CRM SPINE ===== */}
         <g transform="translate(700, 250)">
           <rect x="0" y="0" width="80" height="430" rx="12" fill="url(#crmGrad)" stroke="var(--crm-accent)" strokeWidth="2" strokeDasharray="4 2" />
