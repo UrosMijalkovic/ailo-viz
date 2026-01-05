@@ -7,6 +7,8 @@ import FlowConnector from './FlowConnector';
 
 interface FlowChartProps {
   funnel: FunnelData;
+  allFunnels?: FunnelData[];
+  onFunnelChange?: (funnelId: string) => void;
   onNodeClick?: (node: FlowNodeType) => void;
   activeNodeId?: string | null;
   highlightedPath?: string[];
@@ -24,8 +26,20 @@ interface Transform {
   y: number;
 }
 
+// Trust level colors
+const getTrustColor = (trustLevel: string) => {
+  switch (trustLevel) {
+    case 'ultra': return 'var(--trust-ultra)';
+    case 'warm': return 'var(--trust-warm)';
+    case 'cold': return 'var(--trust-cold)';
+    default: return 'var(--score-mid)';
+  }
+};
+
 export default function FlowChart({
   funnel,
+  allFunnels = [],
+  onFunnelChange,
   onNodeClick,
   activeNodeId,
   highlightedPath = [],
@@ -36,18 +50,24 @@ export default function FlowChart({
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Get the trust color for this funnel
+  const trustColor = getTrustColor(funnel.trustLevel);
+
   // Reset transform when funnel changes
   useEffect(() => {
     setTransform({ scale: 1, x: 0, y: 0 });
   }, [funnel.id]);
 
-  // Calculate node positions based on funnel structure
+  // Identify entry nodes
+  const entryNodeIds = useMemo(() => {
+    const hasIncoming = new Set(funnel.connections.map((c) => c.to));
+    return new Set(funnel.nodes.filter((n) => n.type === 'entry' || !hasIncoming.has(n.id)).map(n => n.id));
+  }, [funnel]);
+
+  // Calculate node positions - entry nodes centered and prominent
   const nodePositions = useMemo(() => {
     const positions: Map<string, NodePosition> = new Map();
     const { nodes, connections } = funnel;
-
-    const hasIncoming = new Set(connections.map((c) => c.to));
-    const entryNodes = nodes.filter((n) => !hasIncoming.has(n.id));
 
     const adjacency = new Map<string, string[]>();
     connections.forEach((conn) => {
@@ -57,7 +77,9 @@ export default function FlowChart({
       adjacency.get(conn.from)!.push(conn.to);
     });
 
+    // Assign levels using BFS from entry nodes
     const levels = new Map<string, number>();
+    const entryNodes = nodes.filter(n => entryNodeIds.has(n.id));
     const queue: { id: string; level: number }[] = entryNodes.map((n) => ({
       id: n.id,
       level: 0,
@@ -82,12 +104,14 @@ export default function FlowChart({
       });
     }
 
+    // Handle orphan nodes
     nodes.forEach((node) => {
       if (!levels.has(node.id)) {
         levels.set(node.id, 0);
       }
     });
 
+    // Group by level
     const levelGroups = new Map<number, string[]>();
     levels.forEach((level, nodeId) => {
       if (!levelGroups.has(level)) {
@@ -96,9 +120,10 @@ export default function FlowChart({
       levelGroups.get(level)!.push(nodeId);
     });
 
-    const horizontalSpacing = 180;
-    const verticalSpacing = 100;
+    const horizontalSpacing = 200;
+    const verticalSpacing = 110;
 
+    // Position nodes - entry nodes get special treatment
     levelGroups.forEach((nodeIds, level) => {
       const groupHeight = (nodeIds.length - 1) * verticalSpacing;
       const startY = -groupHeight / 2;
@@ -112,6 +137,7 @@ export default function FlowChart({
       });
     });
 
+    // Center the graph
     const allX = Array.from(positions.values()).map((p) => p.x);
     const allY = Array.from(positions.values()).map((p) => p.y);
 
@@ -122,9 +148,8 @@ export default function FlowChart({
     const minX = Math.min(...allX);
     const minY = Math.min(...allY);
 
-    // Position graph from top-left with padding
-    const paddingX = 150;
-    const paddingY = 100;
+    const paddingX = 120;
+    const paddingY = 80;
 
     positions.forEach((pos) => {
       pos.x = pos.x - minX + paddingX;
@@ -132,7 +157,7 @@ export default function FlowChart({
     });
 
     return positions;
-  }, [funnel]);
+  }, [funnel, entryNodeIds]);
 
   // Zoom handlers
   const handleZoom = useCallback((delta: number, clientX?: number, clientY?: number) => {
@@ -190,80 +215,150 @@ export default function FlowChart({
   };
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full h-full min-h-[500px] overflow-hidden"
-      style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
-      onWheel={handleWheel}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseLeave}
-    >
-      {/* Zoom Controls */}
-      <div
-        className="absolute top-4 right-4 flex flex-col gap-2 z-10"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={() => handleZoom(0.2)}
-          className="w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold transition-all hover:scale-105"
-          style={{
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border-default)',
-            color: 'var(--text-primary)',
-          }}
-          title="Zoom In"
-        >
-          +
-        </button>
-        <button
-          onClick={() => handleZoom(-0.2)}
-          className="w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold transition-all hover:scale-105"
-          style={{
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border-default)',
-            color: 'var(--text-primary)',
-          }}
-          title="Zoom Out"
-        >
-          −
-        </button>
-        <button
-          onClick={resetView}
-          className="w-10 h-10 rounded-lg flex items-center justify-center text-xs font-medium transition-all hover:scale-105"
-          style={{
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border-default)',
-            color: 'var(--text-secondary)',
-          }}
-          title="Reset View"
-        >
-          ⟲
-        </button>
+    <div className="relative w-full h-full flex flex-col overflow-hidden">
+      {/* Flow Navigation Bar */}
+      {allFunnels.length > 0 && (
         <div
-          className="w-10 h-8 rounded-lg flex items-center justify-center text-xs font-mono"
+          className="flex-shrink-0 px-4 py-3 flex items-center gap-2 overflow-x-auto"
           style={{
-            background: 'var(--bg-tertiary)',
+            background: 'var(--bg-secondary)',
+            borderBottom: '1px solid var(--border-subtle)',
+          }}
+        >
+          <span
+            className="text-xs font-medium uppercase tracking-wider mr-2 flex-shrink-0"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            Flows
+          </span>
+          {allFunnels.map((f) => {
+            const isActive = f.id === funnel.id;
+            const trustColor = getTrustColor(f.trustLevel);
+            return (
+              <button
+                key={f.id}
+                onClick={() => onFunnelChange?.(f.id)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex-shrink-0"
+                style={{
+                  background: isActive
+                    ? `linear-gradient(135deg, ${trustColor}20, ${trustColor}10)`
+                    : 'var(--bg-tertiary)',
+                  border: isActive
+                    ? `2px solid ${trustColor}`
+                    : '1px solid var(--border-default)',
+                  color: isActive ? trustColor : 'var(--text-secondary)',
+                  boxShadow: isActive
+                    ? `0 0 20px ${trustColor}30, inset 0 0 20px ${trustColor}10`
+                    : 'none',
+                  transform: isActive ? 'scale(1.02)' : 'scale(1)',
+                }}
+              >
+                <div
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{
+                    background: trustColor,
+                    boxShadow: isActive ? `0 0 8px ${trustColor}` : 'none',
+                  }}
+                />
+                <span className="whitespace-nowrap">{f.shortName || f.name}</span>
+                {isActive && (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    style={{ marginLeft: '4px' }}
+                  >
+                    <path
+                      d="M5 12H19M19 12L12 5M19 12L12 19"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Canvas Area */}
+      <div
+        ref={containerRef}
+        className="relative flex-1 min-h-[400px] overflow-hidden"
+        style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+      >
+        {/* Zoom Controls */}
+        <div
+          className="absolute top-4 right-4 flex flex-col gap-2 z-10"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => handleZoom(0.2)}
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold transition-all hover:scale-105"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-primary)',
+            }}
+            title="Zoom In"
+          >
+            +
+          </button>
+          <button
+            onClick={() => handleZoom(-0.2)}
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold transition-all hover:scale-105"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-primary)',
+            }}
+            title="Zoom Out"
+          >
+            −
+          </button>
+          <button
+            onClick={resetView}
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-xs font-medium transition-all hover:scale-105"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-secondary)',
+            }}
+            title="Reset View"
+          >
+            ⟲
+          </button>
+          <div
+            className="w-10 h-8 rounded-lg flex items-center justify-center text-xs font-mono"
+            style={{
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-muted)',
+            }}
+          >
+            {Math.round(transform.scale * 100)}%
+          </div>
+        </div>
+
+        {/* Instructions */}
+        <div
+          className="absolute top-4 left-4 text-xs z-10 px-3 py-2 rounded-lg"
+          style={{
+            background: 'var(--bg-elevated)',
             border: '1px solid var(--border-subtle)',
             color: 'var(--text-muted)',
           }}
         >
-          {Math.round(transform.scale * 100)}%
+          Scroll to zoom • Drag to pan
         </div>
-      </div>
-
-      {/* Instructions */}
-      <div
-        className="absolute top-4 left-4 text-xs z-10 px-3 py-2 rounded-lg"
-        style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border-subtle)',
-          color: 'var(--text-muted)',
-        }}
-      >
-        Scroll to zoom • Drag to pan
-      </div>
 
       <svg
         width="100%"
@@ -276,6 +371,10 @@ export default function FlowChart({
             <stop offset="0%" stopColor="var(--accent-gold)" stopOpacity="0.3" />
             <stop offset="50%" stopColor="var(--accent-gold)" stopOpacity="0.8" />
             <stop offset="100%" stopColor="var(--accent-gold)" stopOpacity="0.3" />
+          </linearGradient>
+          <linearGradient id="entryGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="var(--accent-gold)" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="var(--accent-gold)" stopOpacity="0" />
           </linearGradient>
           <filter id="glow">
             <feGaussianBlur stdDeviation="2" result="coloredBlur" />
@@ -291,7 +390,7 @@ export default function FlowChart({
           transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}
           style={{ transformOrigin: 'center center' }}
         >
-        {/* Render connections first (behind nodes) */}
+        {/* Render connections */}
         <g className="connections">
           {funnel.connections.map((connection) => {
             const fromPos = nodePositions.get(connection.from);
@@ -307,11 +406,14 @@ export default function FlowChart({
               hoveredNodeId === connection.from ||
               hoveredNodeId === connection.to;
 
+            // Check if this connection is from an entry node
+            const isFromEntry = entryNodeIds.has(connection.from);
+
             return (
               <FlowConnector
                 key={`${connection.from}-${connection.to}`}
                 connection={connection}
-                fromX={fromPos.x + 60}
+                fromX={fromPos.x + (isFromEntry ? 80 : 60)}
                 fromY={fromPos.y}
                 toX={toPos.x - 60}
                 toY={toPos.y}
@@ -329,6 +431,7 @@ export default function FlowChart({
 
             const isHighlighted = isNodeHighlighted(node.id);
             const isActive = activeNodeId === node.id;
+            const isEntry = entryNodeIds.has(node.id);
 
             return (
               <g
@@ -346,6 +449,8 @@ export default function FlowChart({
                   y={pos.y}
                   isActive={isActive}
                   isHighlighted={hoveredNodeId === node.id}
+                  isEntry={isEntry}
+                  entryColor={isEntry ? trustColor : undefined}
                   onClick={() => onNodeClick?.(node)}
                 />
               </g>
@@ -391,48 +496,59 @@ export default function FlowChart({
         </g>
       </svg>
 
-      {/* Legend */}
-      <div
-        className="absolute bottom-4 left-4 flex flex-wrap gap-4 text-xs z-10 px-3 py-2 rounded-lg"
-        style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border-subtle)',
-        }}
-      >
-        <div className="flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full"
-            style={{ background: 'var(--score-high)' }}
-          />
-          <span style={{ color: 'var(--text-secondary)' }}>High Score</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full"
-            style={{ background: 'var(--score-mid)' }}
-          />
-          <span style={{ color: 'var(--text-secondary)' }}>Mid Score</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full"
-            style={{ background: 'var(--score-low)' }}
-          />
-          <span style={{ color: 'var(--text-secondary)' }}>Low Score</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full"
-            style={{ background: 'var(--crm-accent)' }}
-          />
-          <span style={{ color: 'var(--text-secondary)' }}>CRM</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full"
-            style={{ background: 'var(--accent-gold)' }}
-          />
-          <span style={{ color: 'var(--text-secondary)' }}>Payment</span>
+        {/* Legend */}
+        <div
+          className="absolute bottom-4 left-4 flex flex-wrap gap-4 text-xs z-10 px-3 py-2 rounded-lg"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <div
+              className="w-4 h-4 rounded-lg"
+              style={{
+                background: 'linear-gradient(135deg, var(--accent-gold), var(--accent-gold-dim))',
+                border: '2px solid var(--accent-gold)'
+              }}
+            />
+            <span style={{ color: 'var(--text-secondary)' }}>Entry Point</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div
+              className="w-3 h-3 rounded-full"
+              style={{ background: 'var(--score-high)' }}
+            />
+            <span style={{ color: 'var(--text-secondary)' }}>High Score</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div
+              className="w-3 h-3 rounded-full"
+              style={{ background: 'var(--score-mid)' }}
+            />
+            <span style={{ color: 'var(--text-secondary)' }}>Mid Score</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div
+              className="w-3 h-3 rounded-full"
+              style={{ background: 'var(--score-low)' }}
+            />
+            <span style={{ color: 'var(--text-secondary)' }}>Low Score</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div
+              className="w-3 h-3 rounded-full"
+              style={{ background: 'var(--crm-accent)' }}
+            />
+            <span style={{ color: 'var(--text-secondary)' }}>CRM</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div
+              className="w-3 h-3 rounded-full"
+              style={{ background: 'var(--accent-gold)' }}
+            />
+            <span style={{ color: 'var(--text-secondary)' }}>Payment</span>
+          </div>
         </div>
       </div>
     </div>
